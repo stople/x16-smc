@@ -96,10 +96,7 @@ class PS2Port
         case 1: case 2: case 3: case 4: case 5: case 6: case 7: case 8:
           // Data bit, LSb first
           if (curBit) curCode |= 1 << (rxBitCount - 1);
-          parity += curBit;
-          rxBitCount++;
-          break;
-
+          // fallthrough
         case 9:
           // parity bit
           parity += curBit;
@@ -355,6 +352,15 @@ const uint8_t PS2_REG_SCANCODES[] PROGMEM = {
   0, 0, 118
 };
 
+const uint8_t ps2ext_to_keycode_input[] PROGMEM = {
+  0x11, 0x14, 0x1f, 0x27, 0x2f, 0x69, 0x70, 0x71, 0x6b, 0x6c, 0x75, 0x72, 0x7d, 0x7a, 0x74, 0x4a, 0x5a, 0x7c, 0x15
+};
+
+const uint8_t ps2ext_to_keycode_output[] PROGMEM = {
+  62, 64, 59, 63, 65, 81, 75, 76, 79, 80, 83, 84, 85, 86, 89, 95, 108, 124, 126
+      };
+
+
 template<uint8_t clkPin, uint8_t datPin, uint8_t size>
 class PS2KeyboardPort : public PS2Port<clkPin, datPin, size>
 {
@@ -382,45 +388,13 @@ class PS2KeyboardPort : public PS2Port<clkPin, datPin, size>
     /// @brief Converts a PS/2 Set 2 extended scan code to a IBM System/2 key number
     /// @param scancode The second byte of an extended scan code (after 0xe0)
     uint8_t ps2ext_to_keycode(uint8_t scancode) {
-      switch (scancode) {
-        case 0x11:  // Right Alt
-          return 62;
-        case 0x14:  // Right Ctrl
-          return 64;
-        case 0x1f:  // Left GUI
-          return 59;
-        case 0x27:  // Right GUI
-          return 63;
-        case 0x2f:  // Menu key
-          return 65;
-        case 0x69:  // End
-          return 81;
-        case 0x70:  // Insert
-          return 75;
-        case 0x71:  // Delete
-          return 76;
-        case 0x6b:  // Left arrow
-          return 79;
-        case 0x6c:  // Home
-          return 80;
-        case 0x75:  // Up arrow
-          return 83;
-        case 0x72:  // Down arrow
-          return 84;
-        case 0x7d:  // Page up
-          return 85;
-        case 0x7a:  // Page down
-          return 86;
-        case 0x74:  // Right arrow
-          return 89;
-        case 0x4a:  // KP divide
-          return 95;
-        case 0x5a:  // KP enter
-          return 108;
-        case 0x7c:  // KP PrtScr
-          return 124;
-        case 0x15:  // Pause/Break
-          return 126;
+      // todo replace with binary search for better speed?
+      for (uint8_t i = 0; i < sizeof(ps2ext_to_keycode_input); ++i)
+      {
+        if (pgm_read_byte(&(ps2ext_to_keycode_input[i])) == scancode)
+        {
+          return pgm_read_byte(&(ps2ext_to_keycode_output[i]));
+        }
       }
       return 0;
     }
@@ -597,15 +571,17 @@ class PS2KeyboardPort : public PS2Port<clkPin, datPin, size>
        writes the these changes to the buffer
     */
     bool putModifiers() {
+      uint8_t shifted_bit = 0x01;
       for (uint8_t i = 0; i < 8; i++) {
-        if ((modifier_state & (1 << i)) != (modifier_oldstate & (1 << i))) {
+        if ((modifier_state & shifted_bit) != (modifier_oldstate & shifted_bit)) {
           uint8_t mod = modifier_codes[i];
-          if (!(modifier_state & (1 << i))) {
+          if (!(modifier_state & shifted_bit)) {
             mod |= 0x80;
           }
           if (!bufferAdd(mod)) return false;
-          modifier_oldstate = (modifier_oldstate & ~(1 << i)) | (modifier_state & (1 << i));
+          modifier_oldstate = (modifier_oldstate & ~shifted_bit) | (modifier_state & shifted_bit);
         }
+        shifted_bit <<= 1;
       }
       return true;
     }
