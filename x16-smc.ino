@@ -121,7 +121,6 @@ uint8_t defaultRequest = I2C_CMD_GET_KEYCODE_FAST;
 
 // Bootloader
 volatile uint16_t bootloaderTimer = 0;
-volatile uint8_t bootloaderFlags = 0;
 
 volatile uint16_t flash_read_offset = 0;
 volatile uint8_t spm_lowByte = 0;
@@ -259,10 +258,7 @@ void loop() {
     Keyboard.ackNMIRequest();
   }
 
-  // Bootloader Countdown
-  if (bootloaderTimer > 0) {
-    bootloaderTimer--;
-  }
+  evaluateBootloaderKeypress();
 
   // Short Delay
   _delay_ms(10);
@@ -276,8 +272,7 @@ void loop() {
 void DoPowerToggle() {
   LONGPRESS_START=0;		// Ensure longpress flag is 0
   if (bootloaderTimer > 0) {
-    bootloaderFlags |= 1;
-    startBootloader();
+    // Do nothing, is evaluated inside evaluateBootloaderKeypress()
   }
   else if (SYSTEM_POWERED == 0) {                  // If Off, turn on
     PowerOnSeq();
@@ -297,9 +292,7 @@ void DoLongPressPowerToggle() {
 void DoReset() {
   LONGPRESS_START=0;
   if (bootloaderTimer > 0) {
-    // Bootload init procedure is running, check if Power + Reset pressed
-    bootloaderFlags |= 2;
-    startBootloader();
+    // Do nothing, is evaluated inside evaluateBootloaderKeypress()
   }
   else if (SYSTEM_POWERED == 1) {
     assertReset();
@@ -317,7 +310,10 @@ void DoReset() {
 }
 
 void DoNMI() {
-  if (SYSTEM_POWERED == 1 && bootloaderTimer == 0 ) {   // Ignore unless Powered On; also ignore if bootloader timer is active
+  if (bootloaderTimer > 0) {
+    // Do nothing, is evaluated inside evaluateBootloaderKeypress()
+  }
+  else if (SYSTEM_POWERED == 1) {   // Ignore unless Powered On; also ignore if bootloader timer is active
     digitalWrite_opt(NMIB_PIN, LOW);                // Press NMI
     _delay_ms(NMI_HOLDTIME_MS);
     digitalWrite_opt(NMIB_PIN, HIGH);
@@ -459,7 +455,6 @@ void I2C_Receive(int) {
     case I2C_CMD_BOOTLDR_START:
       if (I2C_Data[1] == 0x31) {
         bootloaderTimer = 2000;
-        bootloaderFlags = 0;
       }
       break;
 
@@ -632,13 +627,28 @@ void mouseClockIrq() {
 // ----------------------------------------------------------------
 // Bootloader Startup
 // ----------------------------------------------------------------
-void startBootloader() {
-  if (bootloaderFlags == 3 && bootloaderTimer > 0) {
-    ((void(*)(void))BOOTLOADER_START_ADDR)();
+void evaluateBootloaderKeypress() {
+  if (bootloaderTimer > 0) {
+    uint8_t temp = SREG;
+    cli();
+    bootloaderTimer--;
+    SREG = temp;
+
+    uint8_t currentKeysPressed = digitalRead_opt(POWER_BUTTON_PIN) | (digitalRead_opt(RESET_BUTTON_PIN) << 1) | (digitalRead_opt(NMI_BUTTON_PIN) << 2);
+    currentKeysPressed ^= 7; // Buttons are active low. Flip bits, to let the following logic use active high logic instead (more intuitive)
+
+    // Reduce timer to 0.5 s once the first key is pressed down
+    if (currentKeysPressed && bootloaderTimer > 50) {
+      bootloaderTimer = 50;
+    }
+
+    // try to start bootloader (Power(0x01) + Reset(0x02) + no NMI)
+    if (currentKeysPressed == 3) { // Power (1) + Reset (2) + no NMI
+      cli();
+      ((void(*)(void))BOOTLOADER_START_ADDR)(); // Start bootloader
+    }
   }
-  else {
-    bootloaderTimer = 50;
-  }
+
 }
 
 
