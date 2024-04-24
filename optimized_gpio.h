@@ -47,12 +47,12 @@ uint8_t get_bitmask_from_pin(uint8_t pin) {
   return _BV(pin & 0x07);
 }
 
-static inline __attribute__((always_inline)) void pinMode_opt(uint8_t pin, uint8_t mode);
-void pinMode_opt(uint8_t pin, uint8_t mode)
-{
+static inline __attribute__((always_inline)) void pinMode_opt_params_known_compiletime(uint8_t pin, uint8_t mode);
+void pinMode_opt_params_known_compiletime(uint8_t pin, uint8_t mode) {
   volatile uint8_t *ddr_reg = get_ddr_address_from_pin(pin);
   volatile uint8_t *port_reg = get_port_address_from_pin(pin);
   uint8_t bitmask = get_bitmask_from_pin(pin);
+
   if (mode == INPUT) {
     // On ATtiny861, PORTx/PINx/DDRx registers are within sbi/cbi range. Thus, no need for atomic.
     *ddr_reg &= ~bitmask;
@@ -67,8 +67,46 @@ void pinMode_opt(uint8_t pin, uint8_t mode)
   }
 }
 
+// We do not want to force inline on this function
+void pinMode_opt_params_not_known_compiletime(uint8_t pin, uint8_t mode) {
+  volatile uint8_t *ddr_reg = get_ddr_address_from_pin(pin);
+  volatile uint8_t *port_reg = get_port_address_from_pin(pin);
+  uint8_t bitmask = get_bitmask_from_pin(pin);
+  uint8_t tmp = SREG;
+  cli();
+  if (mode == INPUT) {
+    *ddr_reg &= ~bitmask;
+    *port_reg &= ~bitmask;
+  }
+  else if (mode == INPUT_PULLUP) {
+    *ddr_reg &= ~bitmask;
+    *port_reg |= bitmask;
+  }
+  else {
+    *ddr_reg |= bitmask;
+  }
+  SREG = tmp;
+}
+
+static inline __attribute__((always_inline)) void pinMode_opt(uint8_t pin, uint8_t mode);
+void pinMode_opt(uint8_t pin, uint8_t mode)
+{
+  //https://stackoverflow.com/a/64455059
+  if (__builtin_constant_p(pin) && __builtin_constant_p(mode)) {
+    // pin and mode is known at compile time.
+    // Safe to ignore atomic operation, as sbi/cbi will be used.
+    pinMode_opt_params_known_compiletime(pin, mode);
+  }
+  else
+  {
+    // pin and mode is not known at compile time.
+    // Atomic pin manipulation is required, as algorithm will likely not use sbi/cbi.
+    pinMode_opt_params_not_known_compiletime(pin, mode);
+  }
+}
+
 static inline __attribute__((always_inline)) void digitalWrite_opt(uint8_t pin, uint8_t val);
-void digitalWrite_opt(uint8_t pin, uint8_t val)
+void digitalWrite_opt_params_known_compiletime(uint8_t pin, uint8_t val)
 {
   volatile uint8_t *port_reg = get_port_address_from_pin(pin);
   uint8_t bitmask = get_bitmask_from_pin(pin);
@@ -77,6 +115,40 @@ void digitalWrite_opt(uint8_t pin, uint8_t val)
   }
   else {
     *port_reg |= bitmask;
+  }
+}
+
+// We do not want to force inline on this function
+void digitalWrite_opt_params_not_known_compiletime(uint8_t pin, uint8_t val)
+{
+  volatile uint8_t *port_reg = get_port_address_from_pin(pin);
+  uint8_t bitmask = get_bitmask_from_pin(pin);
+  uint8_t tmp = SREG;
+  cli();
+  if (val == LOW) {
+    *port_reg &= ~bitmask;
+  }
+  else {
+    *port_reg |= bitmask;
+  }
+  SREG = tmp;
+}
+
+
+static inline __attribute__((always_inline)) void digitalWrite_opt(uint8_t pin, uint8_t val);
+void digitalWrite_opt(uint8_t pin, uint8_t val)
+{
+  //https://stackoverflow.com/a/64455059
+  if (__builtin_constant_p(pin) && __builtin_constant_p(val)) {
+    // pin and val is known at compile time.
+    // Safe to ignore atomic read-modify-write operation, as sbi/cbi will be used.
+    digitalWrite_opt_params_known_compiletime(pin, val);
+  }
+  else
+  {
+    // pin and val is not known at compile time.
+    // Atomic pin manipulation is required, as algorithm will likely not use sbi/cbi.
+    digitalWrite_opt_params_not_known_compiletime(pin, val);
   }
 }
 
