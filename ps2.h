@@ -352,14 +352,22 @@ const uint8_t PS2_REG_SCANCODES[] PROGMEM = {
   0, 0, 118
 };
 
-const uint8_t ps2ext_to_keycode_input[] PROGMEM = {
-  0x11, 0x14, 0x1f, 0x27, 0x2f, 0x69, 0x70, 0x71, 0x6b, 0x6c, 0x75, 0x72, 0x7d, 0x7a, 0x74, 0x4a, 0x5a, 0x7c, 0x15
+const uint8_t PS2_EXT_SCANCODES1[] PROGMEM = {
+  // Index 0x11..0x2f
+  62, 0, 0, 64, 126, 0, 0, 0, 
+  0, 0, 0, 0, 0, 0, 59, 0, 
+  0, 0, 0, 0, 0, 0, 63, 0, 
+  0, 0, 0, 0, 0, 0, 65
 };
 
-const uint8_t ps2ext_to_keycode_output[] PROGMEM = {
-  62, 64, 59, 63, 65, 81, 75, 76, 79, 80, 83, 84, 85, 86, 89, 95, 108, 124, 126
-      };
-
+const uint8_t PS2_EXT_SCANCODES2[] PROGMEM = {
+  // Index 0x5a..0x7d
+  108, 0, 0, 0, 0, 0, 0, 0, 
+  0, 0, 0, 0, 0, 0, 0, 81, 
+  0, 79, 80, 0, 0, 0, 75, 76, 
+  84, 0, 89, 83, 0, 0, 0, 0, 
+  86, 0, 124, 85
+};
 
 template<uint8_t clkPin, uint8_t datPin, uint8_t size>
 class PS2KeyboardPort : public PS2Port<clkPin, datPin, size>
@@ -388,6 +396,22 @@ class PS2KeyboardPort : public PS2Port<clkPin, datPin, size>
     /// @brief Converts a PS/2 Set 2 extended scan code to a IBM System/2 key number
     /// @param scancode The second byte of an extended scan code (after 0xe0)
     uint8_t ps2ext_to_keycode(uint8_t scancode) {
+      if (scancode >= 0x11 && scancode <= 0x2f) {
+        return pgm_read_byte(&(PS2_EXT_SCANCODES1[scancode - 0x11]));
+      }
+      else if (scancode >= 0x5a & scancode <= 0x7d) {
+        return pgm_read_byte(&(PS2_EXT_SCANCODES2[scancode - 0x5a]));
+      }
+      else if (scancode == 0x4a) {
+        return 95;
+      }
+      else {
+        return 0;
+      }
+    }
+    
+    /*
+      uint8_t ps2ext_to_keycode(uint8_t scancode) {
       // todo replace with binary search for better speed?
       for (uint8_t i = 0; i < sizeof(ps2ext_to_keycode_input); ++i)
       {
@@ -398,6 +422,7 @@ class PS2KeyboardPort : public PS2Port<clkPin, datPin, size>
       }
       return 0;
     }
+    */
 
   public:
     uint8_t BAT() {
