@@ -409,20 +409,6 @@ class PS2KeyboardPort : public PS2Port<clkPin, datPin, size>
         return 0;
       }
     }
-    
-    /*
-      uint8_t ps2ext_to_keycode(uint8_t scancode) {
-      // todo replace with binary search for better speed?
-      for (uint8_t i = 0; i < sizeof(ps2ext_to_keycode_input); ++i)
-      {
-        if (pgm_read_byte(&(ps2ext_to_keycode_input[i])) == scancode)
-        {
-          return pgm_read_byte(&(ps2ext_to_keycode_output[i]));
-        }
-      }
-      return 0;
-    }
-    */
 
   public:
     uint8_t BAT() {
