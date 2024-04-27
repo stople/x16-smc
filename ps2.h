@@ -399,7 +399,7 @@ class PS2KeyboardPort : public PS2Port<clkPin, datPin, size>
       if (scancode >= 0x11 && scancode <= 0x2f) {
         return pgm_read_byte(&(PS2_EXT_SCANCODES1[scancode - 0x11]));
       }
-      else if (scancode >= 0x5a & scancode <= 0x7d) {
+      else if (scancode >= 0x5a && scancode <= 0x7d) {
         return pgm_read_byte(&(PS2_EXT_SCANCODES2[scancode - 0x5a]));
       }
       else if (scancode == 0x4a) {
