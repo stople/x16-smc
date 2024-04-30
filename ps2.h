@@ -446,10 +446,9 @@ class PS2KeyboardPort : public PS2Port<clkPin, datPin, size>
       // If buffer_overrun is set, and if we are not in the middle of receiving a multi-byte scancode (indicated by scancode_state == 0),
       // and if the buffer is empty again, we first output modifier key state changes that happened while the buffer was closed,
       // and then clear the buffer_overrun flag
-      if (buffer_overrun && !this->available() && scancode_state == 0x00) {
-        if (putModifiers()) {
-          buffer_overrun = false;
-        }
+      if (buffer_overrun && scancode_state == 0x00 && !this->available() && modifier_state != modifier_oldstate) {
+        buffer_overrun = false;
+        putModifiers(); // buffer_overrun is set to true if new overflow
       }
 
       // Update scancode state and add key code to input buffer
@@ -474,7 +473,7 @@ class PS2KeyboardPort : public PS2Port<clkPin, datPin, size>
           else if (value == 0xab) scancode_state = 0x51;  // Start of two byte response to read ID command
           else if (value == 0xe0) scancode_state = 0x21;  // Start of extended code
           else if (value == 0xe1) scancode_state = 0x41;  // Start of Pause key code
-          else if (!buffer_overrun && value < 0xf0) bufferAdd(ps2_to_keycode(value));
+          else if (value < 0xf0) bufferAdd(ps2_to_keycode(value));
 
           // Update modifier key status
           if (value == 0x12) modifier_state |= PS2_MODIFIER_STATE::LSHIFT;
@@ -497,7 +496,7 @@ class PS2KeyboardPort : public PS2Port<clkPin, datPin, size>
           else if (value == 0x14) modifier_state &= ~PS2_MODIFIER_STATE::LCTRL;
           else if (value == 0x11) modifier_state &= ~PS2_MODIFIER_STATE::LALT;
 
-          if (!buffer_overrun) bufferAdd(ps2_to_keycode(value) | 0x80);
+          bufferAdd(ps2_to_keycode(value) | 0x80);
 
           break;
 
@@ -506,7 +505,7 @@ class PS2KeyboardPort : public PS2Port<clkPin, datPin, size>
           if (value == 0xf0) scancode_state = 0x32; // Extended break code
           else {
             if (value != 0x12 && value != 0x59) {
-              if (!buffer_overrun) bufferAdd(ps2ext_to_keycode(value));
+              bufferAdd(ps2ext_to_keycode(value));
             }
             scancode_state = 0x00;
           }
@@ -526,7 +525,7 @@ class PS2KeyboardPort : public PS2Port<clkPin, datPin, size>
           // Update state
           scancode_state = 0x00;
           if (value != 0x12 && value != 0x59) {
-            if (!buffer_overrun) bufferAdd(ps2ext_to_keycode(value) | 0x80);
+            bufferAdd(ps2ext_to_keycode(value) | 0x80);
           }
 
           // Update modifier key status
@@ -547,7 +546,7 @@ class PS2KeyboardPort : public PS2Port<clkPin, datPin, size>
           break;
 
         case 0x47:
-          if (!buffer_overrun) bufferAdd(126);
+          bufferAdd(126);
           scancode_state = 0x00;
           break;
 
@@ -562,6 +561,7 @@ class PS2KeyboardPort : public PS2Port<clkPin, datPin, size>
        Returns true if successful, else false (if the buffer was full)
     */
     bool bufferAdd(uint8_t value) {
+      if (buffer_overrun) return false;
       byte headNext = (this->head + 1) & (size - 1);
       if (headNext != this->tail) {
         this->buffer[this->head] = value;
