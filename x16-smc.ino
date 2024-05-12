@@ -85,6 +85,7 @@
 #define I2C_CMD_SET_FLASH_PAGE     0x90
 #define I2C_CMD_READ_FLASH         0x91
 #define I2C_CMD_WRITE_FLASH        0x92
+#define I2C_CMD_SPECIAL_MODE       0x93
 
 // Bootloader
 #define FLASH_SIZE            (0x2000)
@@ -124,6 +125,9 @@ volatile uint16_t bootloaderTimer = 0;
 
 volatile uint16_t flash_read_offset = 0;
 volatile uint8_t spm_lowByte = 0;
+
+volatile uint8_t specialModeRequested = 0; // set to 1 to request flash programming
+volatile uint8_t specialModeActive = 0; // set to 1 to activate flash programming
 
 // Flash manipulation functionality
 // This feature should likely not be included in standard FW,
@@ -467,7 +471,9 @@ void I2C_Receive(int) {
 #ifdef FLASH_MANIPULATION
     case I2C_CMD_WRITE_FLASH:
       // Write byte to flash buffer
-      // TODO protect this function with required button press
+
+      // Flash manipulation must be activated with unlock cmd + [power + NMI]
+      if (specialModeActive != 1) break;
 
       // Only allow flash write in boot area 0x1E00-0x1FFF
       if (flash_read_offset < 0x1E00 || flash_read_offset > 0x1FFF) break;
@@ -500,6 +506,18 @@ void I2C_Receive(int) {
       }
       break;
 #endif
+
+    case I2C_CMD_SPECIAL_MODE:
+      specialModeActive = 0;
+      specialModeRequested = I2C_Data[1];
+      if (specialModeRequested) {
+        bootloaderTimer = 2000;
+      }
+      else
+      {
+        bootloaderTimer = 0;
+      }
+      break;
 
   }
   
@@ -572,6 +590,10 @@ void I2C_Send() {
     case I2C_CMD_READ_FLASH: // Raw read from flash
       smcWire.write(pgm_read_byte(flash_read_offset++));
       break;
+
+    case I2C_CMD_SPECIAL_MODE: // Check if special mode is activated
+      smcWire.write(specialModeActive);
+      break;
   }
   
   I2C_Data[0] = defaultRequest;
@@ -628,7 +650,7 @@ void mouseClockIrq() {
 // Bootloader Startup
 // ----------------------------------------------------------------
 void evaluateBootloaderKeypress() {
-  if (bootloaderTimer > 0) {
+  if (bootloaderTimer > 0 && specialModeActive != 1) {
     uint8_t temp = SREG;
     cli();
     bootloaderTimer--;
@@ -642,10 +664,17 @@ void evaluateBootloaderKeypress() {
       bootloaderTimer = 50;
     }
 
-    // try to start bootloader (Power(0x01) + Reset(0x02) + no NMI)
-    if (currentKeysPressed == 3) { // Power (1) + Reset (2) + no NMI
+    // specialModeRequested == 0 -> try to start bootloader (Power(0x01) + Reset(0x02) + no NMI)
+    if (specialModeRequested == 0 && currentKeysPressed == 3) { // Power (1) + Reset (2) + no NMI
       cli();
       ((void(*)(void))BOOTLOADER_START_ADDR)(); // Start bootloader
+    }
+
+    // specialModeRequested == 1 -> try to enable flash programming (Power(0x01) + NMI(0x04) + no Reset)
+    if (specialModeRequested == 1 && currentKeysPressed == 5) { // Power (1) + NMI (4) + no Reset
+      specialModeActive = 1;
+      // The user is currently pressing power+NMI. We want to disable key press until programming is done.
+      bootloaderTimer = 50; // Will not be decremented
     }
   }
 
