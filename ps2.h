@@ -13,6 +13,18 @@ enum PS2_CMD_STATUS : uint8_t {
   CMD_ERR = 0xFE
 };
 
+// ps2ddr bitmask:
+// 0000 000? -> 0: receive, 1: send
+// 0000 00?0 -> 0: enabled, 1: disabled
+// 0000 0?00 -> reset: 0: update enabled state, 1: keep enabled state
+
+enum PS2_DDR : uint8_t {
+  PS2_DDR_RECEIVE = 0x00,
+  PS2_DDR_SEND = 0x01,
+  PS2_DDR_DISABLED = 0x02,
+  PS2_DDR_KEEP_ENABLED_STATE = 0x04
+};
+
 /// @brief PS/2 IO Port handler
 /// @tparam size Circular buffer size for incoming data, must be a power of 2 and not more than 256
 template<uint8_t clkPin, uint8_t datPin, uint8_t size = 16> // Single keycodes can be 4 bytes long. We want a little bit of margin here.
@@ -32,40 +44,49 @@ class PS2Port
     byte rxBitCount;
     uint32_t lastBitMillis;
 
-    volatile uint8_t ps2ddr;
+    volatile PS2_DDR ps2ddr;
     volatile uint8_t outputBuffer[2];
     volatile uint8_t outputSize = 0;
     volatile uint8_t timerCountdown;
     volatile PS2_CMD_STATUS commandStatus = PS2_CMD_STATUS::IDLE;
 
-    void resetReceiver() {
-      resetInput();
+    void resetReceiver(PS2_DDR newDdr) {
+      resetInput(newDdr);
       outputSize = 0;
       timerCountdown = 0;
       flush();
     };
 
-    virtual void resetInput() {
-      if (PWR_ON_active()) {
-        gpio_inputWithPullup(datPin);
-        gpio_inputWithPullup(clkPin);
-      } else {
+    virtual void resetInput(PS2_DDR newDdr) {
+      // Update ps2ddr
+      ps2ddr &= ~0x01; // clear last bit -> no sending
+
+      if ((newDdr & 0x04) == 0) { // preserve bit is not set, update ps2ddr
+        ps2ddr = newDdr;
+      }
+
+      if (ps2ddr & 0x02)
+      {
+        // ps2 disabled
         // Prevent powering the keyboard via the pull-ups when system is off
         // Call reset() after changing PWR_ON
         pinMode_opt(datPin, INPUT);
         pinMode_opt(clkPin, INPUT);
+      } else {
+        // ps2 not disabled
+        gpio_inputWithPullup(datPin);
+        gpio_inputWithPullup(clkPin);
       }
       curCode = 0;
       parity = 0;
       rxBitCount = 0;
-      ps2ddr = 0;
     }
 
   public:
     PS2Port() :
       head(0), tail(0), curCode(0), parity(0), lastBitMillis(0), rxBitCount(0), ps2ddr(0), timerCountdown(0)
     {
-      resetReceiver();
+      resetReceiver(PS2_DDR_DISABLED);
     };
 
     /// @brief Begin processing PS/2 traffic
@@ -76,9 +97,9 @@ class PS2Port
     /// @brief Process data on falling clock edge
     /// @attention This is interrupt code
     void onFallingClock() {
-      if (ps2ddr == 0)
+      if (ps2ddr == PS2_DDR_RECEIVE)
         receiveBit();
-      else
+      else if (ps2ddr == PS2_DDR_SEND)
         sendBit();
     }
 
@@ -88,7 +109,7 @@ class PS2Port
       if (curMillis >= (lastBitMillis + SCANCODE_TIMEOUT_MS))
       {
         // Haven't heard from device in a while, assume this is a new keycode
-        resetInput();
+        resetInput(PS2_DDR_KEEP_ENABLED_STATE);
       }
       lastBitMillis = curMillis;
 
@@ -219,7 +240,7 @@ class PS2Port
 
         case 10:
           //ACK
-          resetInput();    //Prepare host to receive device ACK or Resend (error) code
+          resetInput(PS2_DDR_KEEP_ENABLED_STATE);    //Prepare host to receive device ACK or Resend (error) code
           break;
       }
     }
@@ -245,8 +266,8 @@ class PS2Port
       head = tail = 0;
     }
 
-    void reset() {
-      resetReceiver();
+    void reset(PS2_DDR newDdr) {
+      resetReceiver(newDdr);
       commandStatus = 0;
     }
 
